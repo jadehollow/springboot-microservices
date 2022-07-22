@@ -1,0 +1,337 @@
+:spring_version: 2.3.7.RELEASE
+:toc:
+:project_id: springboot-microservices
+:icons: font
+:source-highlighter: prettify
+
+== What It Is
+
+A microservices application for top sports brands using Java + Spring Boot and Netflix Eureka Server.
+
+The three microservices are:
+
+* The `eureka-server` 
+- This service registers every microservice. Then the client microservice looks up the Eureka server to get a dependent microservice to get the job done. This Eureka Server is owned by Netflix, and in this, Spring Cloud offers a declarative way to register and invoke services by Java annotation.
+* The `item-catalog`
+- This service generates the list of sports brands which are popular in the market.
+* The `edge-service`
+- A service with fallback capabilities which prevent the client from receiving an HTTP error when the service is not available.
+
+== What You Need
+
+:java_version: 8
+:linkattrs:
+
+ifndef::java_version[:java_version: 1.8]
+
+* A favorite text editor or IDE
+* http://www.oracle.com/technetwork/java/javase/downloads/index.html[JDK {java_version}]
+* http://maven.apache.org/download.cgi[Maven 3.2+]
+* https://spring.io/tools[Spring Tools] for your coding environment
+
+
+== How It Works
+
+=== The Eureka Server
+
+The port & Eureka client are configured in `eureka-server/src/main/resources/application.properties`:
+
+====
+[source,java]
+----
+include::eureka-server/src/main/resources/application.properties[]
+----
+====
+
+The main application is configured in `eureka-server/src/main/java/com/example/eurekaserver/EurekaServerApplication.java`. 
+
+The `@SpringBootApplication` annotation is used to mark a configuration class that declares one or more `@Bean` methods and also triggers auto-configuration and component scanning. It's the same as declaring a class with `@Configuration`, `@EnableAutoConfiguration` and `@ComponentScan` annotations. The `@EnableEurekaServer` annotation configures a registry that will allow other applications to communicate:
+
+====
+[source,java]
+----
+@SpringBootApplication
+@EnableEurekaServer
+public class EurekaServerApplication {
+
+	public static void main(String[] args) {
+		SpringApplication.run(EurekaServerApplication.class, args);
+	}
+}
+----
+====
+
+=== The Item Catalog
+
+The port & application name are configured in `item-catalog/src/main/resources/application.properties`:
+
+====
+[source,java]
+----
+include::item-catalog/src/main/resources/application.properties[]
+----
+====
+
+The Eureka cloud properties are configured in `item-catalog/src/main/resources/application-cloud.properties`: 
+
+====
+[source,java]
+----
+include::item-catalog/src/main/resources/application-cloud.properties[]
+----
+====
+
+The main application is configured in `item-catalog/src/main/java/com/example/itemcatalog/ItemCatalogApplication.java`. 
+
+The `@EnableEurekaClient` annotation makes the app into both a Eureka "instance" (i.e. it registers itself) and a "client" (i.e. it can query the registry to locate other services):
+
+====
+[source,java]
+----
+@SpringBootApplication
+@EnableEurekaClient
+public class ItemCatalogApplication {
+
+	public static void main(String[] args) {
+		SpringApplication.run(ItemCatalogApplication.class, args);
+	}
+}
+----
+====
+
+The `Item` structure is defined in `item-catalog/src/main/java/com/example/itemcatalog/model/Item.java`.
+
+The `@Id` annotation specifies the primary key of an entity and the `@GeneratedValue` annotation provides for the specification of generation strategies for the values of primary keys.
+
+====
+[source,java]
+----
+public class Item {
+
+	public Item(String name) {
+        this.name = name;
+    }
+
+    @Id
+    @GeneratedValue
+    private Long id;
+
+    private String name;
+	
+}
+----
+====
+
+The `ItemInitializer` component is defined in `item-catalog/src/main/java/com/example/itemcatalog/ItemInitializer.java`. 
+
+It implements `CommandLineRunner`, an interface used to indicate that a bean should run when it is contained within a SpringApplication. `@Component` is an annotation that allows Spring to automatically detect our custom beans. The `@Override` annotation indicates that the child class method is overwriting its base class method. 
+
+====
+[source,java]
+----
+@Component
+public class ItemInitializer implements CommandLineRunner {
+
+	private final ItemRepository itemRepository;
+
+	ItemInitializer(ItemRepository itemRepository) {
+		this.itemRepository = itemRepository;
+	}
+
+	@Override
+	public void run(String... args) throws Exception {
+
+		Stream.of("Lining", "PUMA", "Bad Boy", "Air Jordan", "Nike", "Adidas", "Reebok")
+				.forEach(item -> itemRepository.save(new Item(item)));
+
+		itemRepository.findAll().forEach(System.out::println);
+
+	}
+}
+----
+====
+
+The `ItemRepository` is located in `item-catalog/src/main/java/com/example/itemcatalog/repository/ItemRepository.java`. 
+
+`@RepositoryRestResource` is used to set options on the public Repository interface - it will automatically create endpoints as appropriate based on the type of Repository that is being extended (i.e. CrudRepository/PagingAndSortingRepository/etc). `JpaRepository` is a Java Persistence API specific extension of `Repository`. It contains the full API of `CrudRepository` and `PagingAndSortingRepository`, so it has basic CRUD operations and pagination/sorting.
+
+====
+[source,java]
+----
+@RepositoryRestResource
+public interface ItemRepository extends JpaRepository<Item, Long>{
+//@RepositoryRestResource since this creates a HATEOAS service with Spring JPA.
+}
+----
+====
+
+=== The Edge Service
+
+The port & application name are configured in `edge-service/src/main/resources/application.properties`:
+
+====
+[source,java]
+----
+include::edge-service/src/main/resources/application.properties[]
+----
+====
+
+The Eureka cloud properties are configured in `edge-service/src/main/resources/application-cloud.properties`: 
+
+====
+[source,java]
+----
+include::edge-service/src/main/resources/application-cloud.properties[]
+----
+====
+
+The main application is configured in `edge-service/src/main/java/com/example/edgeservice/EdgeServiceApplication.java`. 
+
+The `@EnableFeignClients` annotation enables component scanning for interfaces that declare they are Feign clients. The `@EnableCircuitBreaker` annotation will scan the classpath for any compatible Circuit Breaker implementation. `@EnableDiscoveryClient` will discover service instances from the Eureka Server. And `@EnableZuulProxy` is used to make your Spring Boot application act as a Zuul Proxy server.
+
+====
+[source,java]
+----
+@EnableFeignClients
+@EnableCircuitBreaker
+@EnableDiscoveryClient
+@EnableZuulProxy
+@SpringBootApplication
+public class EdgeServiceApplication {
+
+	public static void main(String[] args) {
+		SpringApplication.run(EdgeServiceApplication.class, args);
+	}
+}
+----
+====
+
+The `Item` structure is defined in `edge-service/src/main/java/com/example/edgeservice/model/Item.java`. 
+
+It uses Lombok's `@Data`, an annotation that generates all the boilerplate that is normally associated with simple POJOs (Plain Old Java Objects) and beans.
+
+====
+[source,java]
+----
+@Data
+public class Item {
+	
+	private String name;
+	
+	public String getName() {
+		return name;
+	}
+
+	public void setName(String name) {
+		this.name = name;
+	}
+
+}
+----
+====
+
+The `ItemClient` interface is located in `edge-service/src/main/java/com/example/edgeservice/ItemClient.java`.
+
+It utilizes `@FeignClient`, a library for creating REST API clients in a declarative way. So, instead of manually coding clients for remote API and maybe using Springs RestTemplate, we declare a client definition and the rest is generated during runtime for use. `@GetMapping` is an annotation for mapping HTTP GET requests onto specific handler methods. It acts as a shortcut for `@RequestMapping`.
+
+====
+[source,java]
+----
+@FeignClient("item-catalog-service")
+public interface ItemClient {
+	
+	@GetMapping("/items")
+	CollectionModel<Item> readItems();
+
+}
+----
+====
+
+The `GoodItemApiAdapterRestController` is defined in `edge-service/src/main/java/com/example/edgeservice/GoodItemApiAdapterRestController.java`.
+
+`@RestController` is a convenience annotation for creating Restful controllers. It is a specialization of @Component and adds the @Controller and @ResponseBody annotations. It converts the response to JSON or XML. `@HystrixCommand` is used to wrap code that will execute potentially risky functionality (typically meaning a service call over the network) with fault and latency tolerance, statistics and performance metrics capture, circuit breaker and bulkhead functionality. `@GetMapping` is an annotation for mapping HTTP GET requests onto specific handler methods. It acts as a shortcut for `@RequestMapping`.
+
+====
+[source,java]
+----
+@RestController
+public class GoodItemApiAdapterRestController {
+
+	private final ItemClient itemClient;
+
+    public GoodItemApiAdapterRestController(ItemClient itemClient) {
+        this.itemClient = itemClient;
+    }
+
+    public Collection<Item> fallback() {
+		return new ArrayList<>();
+	}
+
+	@HystrixCommand(fallbackMethod = "fallback")
+    @GetMapping("/top-brands")
+    public Collection<Item> goodItems() {
+    	System.out.println("====goodItems===");
+        return itemClient.readItems()
+                .getContent()
+                .stream()
+                .filter(this::isGreat)
+                .collect(Collectors.toList());
+    }
+
+    private boolean isGreat(Item item) {
+        return !item.getName().equals("Nike") &&
+                !item.getName().equals("Adidas") &&
+                !item.getName().equals("Reebok");
+    }
+}
+----
+====
+
+== Run the Microservices
+
+=== The Eureka Server
+
+From the root of the `eureka-server` project folder, run it by using: 
+
+====
+[subs="attributes", role="has-copy-button"]
+----
+mvn -q clean install spring-boot:run
+----
+====
+
+Once the service is running, navigate to http://localhost:8761. The Spring Eureka Server will open and show that no instances are currently available.
+
+Leave the `eureka-server` running and move to the `item-catalog` next.
+
+=== The Item Catalog
+
+From the root of the `item-catalog` project folder, run it by using: 
+
+====
+[subs="attributes", role="has-copy-button"]
+----
+mvn -q clean install spring-boot:run
+----
+====
+
+Once the service is up, navigate to http://localhost:8761, and you will see that the `item-catalog-service` is running. 
+
+Open http://localhost:8088/items to view the list of items from the catalog service.
+
+Leave both `eureka-server` and `item-catalog` running, and move to `edge-service` next.
+
+=== The Edge Service
+
+From the root of the `edge-service` project folder, run it by using: 
+
+====
+[subs="attributes", role="has-copy-button"]
+----
+mvn -q clean install spring-boot:run
+----
+====
+
+Once the service is up, navigate to http://localhost:8761, and you will see that the `item-catalog-service` and the `edge-service` are running. 
+
+Open http://localhost:8089/top-brands and you will see the list of top brands from the item catalog service.
